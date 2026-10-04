@@ -11,8 +11,10 @@ futures-util = "0.3.34"
 gstreamer = "0.25.4"
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 thiserror = "2.0.21"
 toml = "1.1.6"
+zbus = "5.19.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"

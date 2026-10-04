@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::NaiveDateTime;
 
+use crate::audio::TrackGain;
 use crate::buffer::Segment;
-use crate::format::Container;
+use crate::format::{Codec, Container};
 use crate::session::Mode;
 
 /// Nome do arquivo, ex.: `Replay_2026-10-04_15-30-12.mp4`.
@@ -50,11 +51,60 @@ pub fn ffmpeg_args(list: &Path, output: &Path) -> Vec<String> {
         .map(String::from)
         .chain([
             list.to_string_lossy().into_owned(),
+            // sem `-map 0` o ffmpeg guardaria só uma faixa de áudio
+            "-map".into(),
+            "0".into(),
             "-c".into(),
             "copy".into(),
             output.to_string_lossy().into_owned(),
         ])
         .collect()
+}
+
+/// De onde o `ffmpeg` lê para o remix.
+#[derive(Debug, Clone, Copy)]
+pub enum RemixInput<'a> {
+    /// Lista de segmentos (modo `concat`).
+    Concat(&'a Path),
+    /// Um arquivo único (gravação manual).
+    File(&'a Path),
+}
+
+/// Argumentos do ffmpeg que copiam o vídeo e refazem o áudio com uma única faixa,
+/// mixando só `tracks` (cada uma com seu ganho em %).
+pub fn remix_args(input: RemixInput, tracks: &[TrackGain], container: Container, output: &Path) -> Vec<String> {
+    let gains: Vec<String> = tracks
+        .iter()
+        .enumerate()
+        .map(|(k, t)| {
+            let out = if tracks.len() == 1 { "a".to_string() } else { format!("t{k}") };
+            format!("[0:a:{}]volume={:.2}[{out}]", t.index, f64::from(t.percent) / 100.0)
+        })
+        .collect();
+    let mut filter = gains.join(";");
+    if tracks.len() > 1 {
+        let inputs: String = (0..tracks.len()).map(|k| format!("[t{k}]")).collect();
+        filter.push_str(&format!(";{inputs}amix=inputs={}:normalize=0:duration=longest[a]", tracks.len()));
+    }
+    let audio_codec = match container.codec() {
+        Codec::H264 => "aac",
+        Codec::Vp9 => "libopus",
+    };
+    let mut args: Vec<String> = vec!["-n".into()];
+    match input {
+        RemixInput::Concat(list) => {
+            args.extend(["-f", "concat", "-safe", "0", "-i"].map(String::from));
+            args.push(list.to_string_lossy().into_owned());
+        }
+        RemixInput::File(file) => {
+            args.push("-i".into());
+            args.push(file.to_string_lossy().into_owned());
+        }
+    }
+    args.extend(["-filter_complex".to_string(), filter]);
+    args.extend(["-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a"].map(String::from));
+    args.extend([audio_codec.to_string(), "-b:a".into(), "192k".into(), output.to_string_lossy().into_owned()]);
+    args
 }
 
 #[cfg(test)]
@@ -110,11 +160,75 @@ mod tests {
     }
 
     #[test]
-    fn ffmpeg_copies_streams_without_overwriting() {
+    fn ffmpeg_copies_all_streams_without_overwriting() {
         let args = ffmpeg_args(Path::new("/tmp/l.txt"), Path::new("/out/c.mp4"));
         assert_eq!(
             args,
-            ["-n", "-f", "concat", "-safe", "0", "-i", "/tmp/l.txt", "-c", "copy", "/out/c.mp4"]
+            ["-n", "-f", "concat", "-safe", "0", "-i", "/tmp/l.txt", "-map", "0", "-c", "copy", "/out/c.mp4"]
         );
+    }
+
+    fn tg(index: usize, percent: u32) -> TrackGain {
+        TrackGain { index, percent }
+    }
+
+    fn filter_of(args: &[String]) -> &str {
+        let i = args.iter().position(|a| a == "-filter_complex").expect("sem -filter_complex");
+        &args[i + 1]
+    }
+
+    #[test]
+    fn remix_copies_video_and_encodes_one_audio_track() {
+        let args = remix_args(
+            RemixInput::Concat(Path::new("/tmp/l.txt")),
+            &[tg(0, 100), tg(2, 100)],
+            Container::Mp4,
+            Path::new("/out/c.mp4"),
+        );
+        assert_eq!(&args[..7], ["-n", "-f", "concat", "-safe", "0", "-i", "/tmp/l.txt"]);
+        let tail = &args[args.len() - 11..];
+        assert_eq!(
+            tail,
+            ["-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "/out/c.mp4"]
+        );
+    }
+
+    #[test]
+    fn remix_mixes_the_chosen_tracks_with_their_gains_without_normalizing() {
+        let args = remix_args(
+            RemixInput::File(Path::new("/in.mp4")),
+            &[tg(1, 80), tg(2, 120)],
+            Container::Mp4,
+            Path::new("/out.mp4"),
+        );
+        assert_eq!(
+            filter_of(&args),
+            "[0:a:1]volume=0.80[t0];[0:a:2]volume=1.20[t1];[t0][t1]amix=inputs=2:normalize=0:duration=longest[a]"
+        );
+    }
+
+    #[test]
+    fn remix_with_a_single_track_just_applies_the_gain() {
+        let args = remix_args(RemixInput::File(Path::new("/in.mp4")), &[tg(0, 50)], Container::Mkv, Path::new("/o.mkv"));
+        assert_eq!(filter_of(&args), "[0:a:0]volume=0.50[a]");
+    }
+
+    #[test]
+    fn remix_reads_a_plain_file_without_concat_options() {
+        let args = remix_args(RemixInput::File(Path::new("/in.mp4")), &[tg(0, 100)], Container::Mp4, Path::new("/o.mp4"));
+        assert_eq!(&args[..3], ["-n", "-i", "/in.mp4"]);
+        assert!(!args.contains(&"concat".to_string()));
+    }
+
+    #[test]
+    fn remix_audio_codec_follows_container() {
+        let codec = |c| {
+            let a = remix_args(RemixInput::File(Path::new("/i")), &[tg(0, 100)], c, Path::new("/o"));
+            let i = a.iter().position(|x| x == "-c:a").unwrap();
+            a[i + 1].clone()
+        };
+        assert_eq!(codec(Container::Mp4), "aac");
+        assert_eq!(codec(Container::Mkv), "aac");
+        assert_eq!(codec(Container::WebM), "libopus");
     }
 }

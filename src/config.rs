@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::audio::AudioMode;
 use crate::format::{Container, Quality};
 
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +29,21 @@ pub struct Config {
     pub fps: u32,
     pub container: Container,
     pub quality: Quality,
+    pub audio: AudioMode,
+    /// Aplicativo (`application.name`) cujo som é gravado; `None` = áudio do sistema.
+    pub audio_app: Option<String>,
+    /// Microfone (`node.name` do PipeWire); `None` = o padrão do sistema.
+    pub mic_source: Option<String>,
+    /// Com um app escolhido, grava faixas separadas e pergunta sobre a música ao salvar.
+    pub ask_music: bool,
+    /// Ganho do jogo na gravação, em % (0 a 200).
+    pub game_volume: u32,
+    /// Ganho do microfone na gravação, em % (0 a 200).
+    pub mic_volume: u32,
+    /// Grava também a call (apps de voz como o Discord).
+    pub record_call: bool,
+    /// Ganho da call na gravação, em % (0 a 200).
+    pub call_volume: u32,
     /// Quantos segundos o botão "salvar clip" do modo replay recupera.
     pub clip_seconds: u32,
 }
@@ -49,6 +65,14 @@ impl Default for Config {
             fps: 60,
             container: Container::default(),
             quality: Quality::default(),
+            audio: AudioMode::default(),
+            audio_app: None,
+            mic_source: None,
+            ask_music: true,
+            game_volume: 100,
+            mic_volume: 100,
+            record_call: false,
+            call_volume: 100,
             clip_seconds: 120,
         }
     }
@@ -78,7 +102,10 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         check("buffer_minutes", self.buffer_minutes, 1..=60)?;
         check("fps", self.fps, 1..=240)?;
-        check("clip_seconds", self.clip_seconds, 5..=3600)
+        check("clip_seconds", self.clip_seconds, 5..=3600)?;
+        check("game_volume", self.game_volume, 0..=200)?;
+        check("mic_volume", self.mic_volume, 0..=200)?;
+        check("call_volume", self.call_volume, 0..=200)
     }
 
     pub fn from_toml(s: &str) -> Result<Self, ConfigError> {
@@ -174,6 +201,80 @@ mod tests {
         let c = Config::from_toml("buffer_minutes = 5\nbitrate_kbps = 8000").unwrap();
         assert_eq!(c.buffer_minutes, 5);
         assert_eq!(c.quality, Quality::High);
+    }
+
+    #[test]
+    fn ask_music_is_on_by_default_and_roundtrips() {
+        assert!(Config::default().ask_music);
+        let c = Config { ask_music: false, ..Config::default() };
+        assert_eq!(Config::from_toml(&c.to_toml().unwrap()).unwrap(), c);
+        assert!(Config::from_toml("buffer_minutes = 5").unwrap().ask_music);
+    }
+
+    #[test]
+    fn mic_source_defaults_to_the_system_default_and_roundtrips() {
+        assert_eq!(Config::default().mic_source, None);
+        let c = Config { mic_source: Some("bluez_input.84:AC:60:D7:C8:B2".into()), ..Config::default() };
+        let toml = c.to_toml().unwrap();
+        assert!(toml.contains("mic_source = \"bluez_input.84:AC:60:D7:C8:B2\""), "{toml}");
+        assert_eq!(Config::from_toml(&toml).unwrap(), c);
+    }
+
+    #[test]
+    fn the_call_is_not_recorded_by_default_since_it_has_other_people_voices() {
+        let c = Config::default();
+        assert!(!c.record_call);
+        assert_eq!(c.call_volume, 100);
+        let c = Config { record_call: true, call_volume: 70, ..Config::default() };
+        assert_eq!(Config::from_toml(&c.to_toml().unwrap()).unwrap(), c);
+        assert!(matches!(
+            Config { call_volume: 201, ..Config::default() }.validate(),
+            Err(ConfigError::Invalid { field: "call_volume", .. })
+        ));
+    }
+
+    #[test]
+    fn volumes_default_to_unity_and_accept_zero_to_200() {
+        let c = Config::default();
+        assert_eq!((c.game_volume, c.mic_volume), (100, 100));
+        for v in [0, 200] {
+            assert!(Config { game_volume: v, mic_volume: v, ..Config::default() }.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn rejects_volume_above_200() {
+        assert!(matches!(
+            Config { game_volume: 201, ..Config::default() }.validate(),
+            Err(ConfigError::Invalid { field: "game_volume", .. })
+        ));
+        assert!(matches!(
+            Config { mic_volume: 201, ..Config::default() }.validate(),
+            Err(ConfigError::Invalid { field: "mic_volume", .. })
+        ));
+    }
+
+    #[test]
+    fn volumes_survive_roundtrip() {
+        let c = Config { game_volume: 60, mic_volume: 150, ..Config::default() };
+        assert_eq!(Config::from_toml(&c.to_toml().unwrap()).unwrap(), c);
+    }
+
+    #[test]
+    fn audio_is_off_by_default_so_the_mic_is_never_recorded_unasked() {
+        let c = Config::default();
+        assert_eq!(c.audio, AudioMode::Off);
+        assert_eq!(c.audio_app, None);
+    }
+
+    #[test]
+    fn audio_settings_survive_roundtrip() {
+        let c = Config { audio: AudioMode::GameAndMic, audio_app: Some("pxgme-linux".into()), ..Config::default() };
+        let toml = c.to_toml().unwrap();
+        assert!(toml.contains("audio = \"game_and_mic\""), "{toml}");
+        assert_eq!(Config::from_toml(&toml).unwrap(), c);
+        let c = Config { audio_app: None, ..c };
+        assert_eq!(Config::from_toml(&c.to_toml().unwrap()).unwrap(), c);
     }
 
     #[test]

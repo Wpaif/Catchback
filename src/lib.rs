@@ -9,3 +9,6 @@ pub mod gst;
 pub mod portal;
 pub mod labels;
 pub mod format;
+pub mod audio;
+pub mod music;
+pub mod mic;
