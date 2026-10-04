@@ -928,6 +928,10 @@ mod debug_snapshot {
 
     pub fn run(app: &Rc<App>, dir: PathBuf) {
         let _ = std::fs::create_dir_all(&dir);
+        if let Some(display) = gtk::gdk::Display::default() {
+            let found = gtk::IconTheme::for_display(&display).has_icon(APP_ID);
+            eprintln!("ícone {APP_ID} encontrado pelo tema: {found}");
+        }
         let step = |ms: u64, f: Step| {
             let app = app.clone();
             glib::timeout_add_local_once(Duration::from_millis(ms), move || f(&app));
@@ -1010,7 +1014,20 @@ mod debug_snapshot {
     }
 }
 
+/// Ícone do aplicativo: padrão de todas as janelas. Em desenvolvimento (`cargo run`)
+/// ele ainda não está instalado, então o tema também procura em `data/icons`.
+fn setup_icon() {
+    if let Some(display) = gtk::gdk::Display::default() {
+        let dev_icons = concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons");
+        if std::path::Path::new(dev_icons).exists() {
+            gtk::IconTheme::for_display(&display).add_search_path(dev_icons);
+        }
+    }
+    gtk::Window::set_default_icon_name(APP_ID);
+}
+
 fn build_ui(application: &adw::Application) {
+    setup_icon();
     // No modo de depuração a configuração fica na pasta das capturas: os cenários
     // mexem nos controles e não podem sobrescrever a configuração real do usuário.
     let config_path = match std::env::var("CATCHBACK_SNAPSHOT_DIR") {

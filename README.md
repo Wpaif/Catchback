@@ -1,4 +1,8 @@
-# Catchback
+<p align="center">
+  <img src="data/icons/hicolor/scalable/apps/dev.catchback.Catchback.svg" alt="Ícone do Catchback" width="112">
+</p>
+
+<h1 align="center">Catchback</h1>
 
 Replay buffer e gravador de tela para Linux, feito para registrar aquele momento raro (um shiny, um drop, uma captura) **depois** que ele acontece, sem precisar lembrar de apertar "gravar" antes.
 
@@ -77,7 +81,25 @@ sudo pacman -S --needed rust gtk4 libadwaita ffmpeg xdg-desktop-portal \
     gst-plugin-pipewire
 ```
 
+## Instalação
+
+```sh
+./install.sh
+```
+
+Compila em modo release e instala em `~/.local`: o binário (`bin/catchback`), o **atalho no menu de aplicativos** (`Catchback`, com o ícone de replay) e o ícone. Depois é só abrir pelo menu do sistema. Na primeira vez o GNOME pode levar alguns segundos para mostrar o atalho; se não aparecer, saia e entre na sessão de novo.
+
+| Comando | O que faz |
+|---|---|
+| `./install.sh --prefix /usr/local` | instala para todos os usuários (precisa de `sudo`) |
+| `./install.sh --bin caminho/do/catchback` | usa um binário já compilado, sem rodar o `cargo` |
+| `./install.sh --uninstall` | remove o binário, o atalho e o ícone |
+
+O arquivo `data/dev.catchback.Catchback.desktop` tem o mesmo nome do ID do aplicativo, que é o que o Wayland usa para ligar a janela ao ícone certo. Se você instalar por fora do script, copie o `.desktop` para `share/applications` e o SVG de `data/icons` para `share/icons`.
+
 ## Como usar
+
+Sem instalar, para testar direto do código:
 
 ```sh
 cargo run --release
@@ -131,8 +153,11 @@ O núcleo é independente da interface e testável:
 | `recorder`    | Orquestra tudo atrás de traits (backend e exportador)          |
 | `gst`, `ffmpeg`, `portal` | Implementações reais: GStreamer, ffmpeg e portal   |
 | `audio`       | Modos de áudio, apps tocando (`pactl`/`pw-dump`), faixas e mixagem |
+| `mic`         | Lista de microfones, teste de nível e detecção de saturação     |
 | `music`       | Detecção de música (MPRIS + fluxos ativos) e histórico do trecho |
 | `labels`      | Textos da interface                                            |
+
+Fora do código: `data/` guarda o atalho (`.desktop`) e o ícone (SVG), e `install.sh` instala tudo.
 
 ## Conferir a interface
 
@@ -145,6 +170,8 @@ cargo test
 ```
 
 Os testes de unidade cobrem o núcleo. Há também testes de integração com o GStreamer e o `ffmpeg` reais, que usam uma fonte de teste no lugar do PipeWire e conferem os arquivos gerados em todos os formatos. Se o GStreamer ou o `ffmpeg` não estiverem disponíveis, esses testes são ignorados.
+
+`tests/desktop_entry.rs` confere o atalho e o ícone (campos obrigatórios, validação com `desktop-file-validate`, renderização do SVG) e roda o instalador num diretório temporário, instalando e desinstalando.
 
 ## Limitações e próximos passos
 

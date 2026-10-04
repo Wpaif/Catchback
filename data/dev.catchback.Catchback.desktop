@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Catchback
+GenericName=Gravador de replay
+Comment=Grave a tela e salve retroativamente os últimos minutos
+Comment[en]=Record your screen and save the last minutes after the fact
+Exec=catchback
+Icon=dev.catchback.Catchback
+Terminal=false
+Categories=AudioVideo;Video;Recorder;GTK;
+Keywords=replay;gravar;gravador;tela;clip;screen;recorder;capture;shiny;
+StartupNotify=true
+StartupWMClass=dev.catchback.Catchback
