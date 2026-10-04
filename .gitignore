@@ -1,1 +1,28 @@
+# Build do Cargo
 /target
+
+# Editores e IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Configurações locais do Claude Code
+.claude/settings.local.json
+
+# Segredos e variáveis de ambiente locais
+.env
+.env.*
+
+# Vídeos e arquivos temporários gerados em testes manuais
+*.mp4
+*.mkv
+*.webm
+*.concat.txt
+/segments/
+/Catchback/
